@@ -36,14 +36,7 @@ int main(int argc, char *argv[])
 
     run::ViewerRunArgs args = run::parseViewerArgs(argc, argv);
 
-    bool dynamicMovement = true;
-    if (args.argCounter < argc) {
-        // An extra argument that can be passed is "controlled".
-        // By default, the cameras are going to move around the scene
-        // automatically. But, if you pass "controlled", you can control
-        // the movement of the cameras to explore the environment.
-        dynamicMovement = !!strcmp("controlled", argv[args.argCounter]);
-    }
+    std::string glb_path = argv[args.argCounter];
 
     // "Batch renderer" refers to the rasterizer.
     bool enable_batch_renderer = (args.renderMode == run::RenderMode::Rasterizer);
@@ -70,7 +63,8 @@ int main(int argc, char *argv[])
         .extRenderAPI = wm.gpuAPIManager().backend(),
         .extRenderDev = render_gpu.device(),
         .raycastOutputResolution = output_resolution,
-        .dynamicMovement = dynamicMovement
+        .headlessMode = false,
+        .glbPath = glb_path
     });
     float camera_move_speed = 10.f;
 

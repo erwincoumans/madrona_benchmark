@@ -28,9 +28,7 @@ public:
         madrona::render::GPUDevice *extRenderDev = nullptr;
         uint32_t raycastOutputResolution = 64;
         bool headlessMode = false;
-
-        // Flip this to true by default for headless
-        bool dynamicMovement = true;
+        std::string glbPath;
     };
 
     Manager(const Config &cfg);

@@ -1,53 +1,31 @@
 #pragma once
 
-// #define MERGE_ALL
-
 #include <madrona/taskgraph_builder.hpp>
 #include <madrona/custom_context.hpp>
 #include <madrona/rand.hpp>
 
-#include "consts.hpp"
 #include "types.hpp"
-#include "madrona/mesh_bvh.hpp"
 
-
-namespace madEscape {
+namespace madMJX {
 
 class Engine;
 
 // This enum is used by the Sim and Manager classes to track the export slots
 // for each component exported to the training code.
 enum class ExportID : uint32_t {
-    Action,
-    Raycast,
+    InstancePositions,
+    InstanceRotations,
+    CameraPositions,
+    CameraRotations,
+    RaycastColor,
+    RaycastDepth,
     NumExports,
 };
 
-struct ImportedInstance {
-    madrona::math::Vector3 position;
-    madrona::math::Quat rotation;
-    madrona::math::Diag3x3 scale;
-    int32_t objectID;
-};
-
 enum class TaskGraphID : uint32_t {
-    Step,
+    Init,
     Render,
-    NumTaskGraphs,
-};
-
-// This is used for generic rendering objects
-using SimObject = uint32_t;
-
-struct UniqueScene {
-    uint32_t numInstances;
-    uint32_t instancesOffset;
-    uint32_t numObjects;
-    madrona::math::Vector3 center;
-};
-
-struct TimeSingleton {
-    float currentTime;
+    NumGraphs,
 };
 
 // The Sim class encapsulates the per-world state of the simulation.
@@ -59,50 +37,35 @@ struct TimeSingleton {
 // in this class in order to ensure efficient access patterns.
 struct Sim : public madrona::WorldBase {
     struct Config {
-        bool autoReset;
-        RandKey initRandKey;
+        int32_t *geomTypes;
+        int32_t *geomDataIDs;
+        Vector3 *geomSizes;
+        uint32_t numGeoms;
+        uint32_t numCams;
         const madrona::render::RenderECSBridge *renderBridge;
-
-        uint32_t numObjects;
-        uint32_t numImportedInstances;
-        ImportedInstance *importedInstances;
-
-        madrona::math::Vector2 sceneCenter;
-
-        uint32_t numUniqueScenes;
-        UniqueScene *uniqueScenes;
-
-        uint32_t numWorlds;
-
-        uint32_t numAgents;
-
-        bool mergeAll;
-        bool dynamicMovement;
     };
 
+    // This class would allow per-world custom data to be passed into
+    // simulator initialization, but that isn't necessary in this environment
     struct WorldInit {};
 
+    // Sim::registerTypes is called during initialization
+    // to register all components & archetypes with the ECS.
     static void registerTypes(madrona::ECSRegistry &registry,
                               const Config &cfg);
 
+    // Sim::setupTasks is called during initialization to build
+    // the system task graph that will be invoked by the 
+    // Manager class (src/mgr.hpp) for each step.
     static void setupTasks(madrona::TaskGraphManager &taskgraph_mgr,
                            const Config &cfg);
 
+    // The constructor is called for each world during initialization.
+    // Config is global across all worlds, while WorldInit (src/init.hpp)
+    // can contain per-world initialization data, created in (src/mgr.cpp)
     Sim(Engine &ctx,
         const Config &cfg,
         const WorldInit &);
-
-    madrona::RandKey initRandKey;
-    madrona::RNG rng;
-
-    ImportedInstance *importedInstances;
-    uint32_t numImportedInstances;
-
-    madrona::math::Vector2 worldCenter;
-
-    madrona::Entity agent;
-
-    bool dynamicMovement;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

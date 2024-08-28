@@ -1,6 +1,5 @@
 #include "mgr.hpp"
 #include "sim.hpp"
-#include "import.hpp"
 
 #include <random>
 #include <numeric>
@@ -206,198 +205,45 @@ struct LoadResult {
     std::vector<UniqueScene> uniqueSceneInfos;
 };
 
-static imp::ImportedAssets loadScenes(
+
+static imp::ImportedAssets loadGLB(
         Optional<render::RenderManager> &render_mgr,
-        uint32_t first_unique_scene,
-        uint32_t num_unique_scenes,
+        const std::string &glb_path,
         LoadResult &load_result)
 {
-    const char *cache_everything = getenv("MADRONA_CACHE_ALL_BVH");
-    const char *proc_thor = getenv("MADRONA_PROC_THOR");
-
-    std::string hssd_scenes = std::filesystem::path(DATA_DIR) /
-        "hssd-hab/scenes";
-    std::string procthor_scenes = std::filesystem::path(DATA_DIR) /
-        "ai2thor-hab/ai2thor-hab/configs/scenes/ProcTHOR/5";
-    std::string procthor_root = std::filesystem::path(DATA_DIR) /
-        "ai2thor-hab/ai2thor-hab/configs";
-
-    //Use Uncompressed because our GLTF loader doesn't support loading compressed vertex formats
-    std::string procthor_obj_root = std::filesystem::path(DATA_DIR) /
-        "ai2thor-hab/ai2thorhab-uncompressed/configs";
-
-    //Uncomment this for procthor
-    if (proc_thor && proc_thor[0] == '1') {
-        hssd_scenes = procthor_scenes;
-    }
-    
-    std::vector<std::string> scene_paths;
-
-    for (const auto &dir_entry :
-            std::filesystem::directory_iterator(hssd_scenes)) {
-        scene_paths.push_back(dir_entry.path());
-    }
-
-    if (cache_everything && std::stoi(cache_everything) == 1) {
-        num_unique_scenes = scene_paths.size();
-    }
-
     std::vector<std::string> render_asset_paths;
 
-    float height_offset = 0.f;
-    float scale = 10.f;
+    // Object 0 is the glb object
+    render_asset_paths.push_back(
+            std::filesystem::path(DATA_DIR) / glb_path);
 
-    // Generate random permutation of iota
-    std::vector<int> random_indices(scene_paths.size());
-    std::iota(random_indices.begin(), random_indices.end(), 0);
+    // Object 1 is the plane
+    render_asset_paths.push_back(
+            std::filesystem::path(DATA_DIR) / "plane.obj");
 
-    auto rnd_dev = std::random_device {};
-    auto rng = std::default_random_engine { rnd_dev() };
+    printf("GLB path to render: %s\n", render_asset_paths[0].c_str());
 
-    const char *seed_str = getenv("MADRONA_SEED");
-    if (seed_str) {
-        rng.seed(std::stoi(seed_str));
-    } else {
-        rng.seed(0);
-    }
+    load_result.importedInstances.push_back({
+        .position = { 0.f, 0.f, 0.f },
+        .rotation = Quat::angleAxis(pi_d2, { 1.f, 0.f, 0.f }),
+        .scale = Diag3x3{ 10.f, 10.f, 10.f },
+        .objectID = 0
+    });
 
-    std::shuffle(random_indices.begin(), random_indices.end(), rng);
+    load_result.importedInstances.push_back({
+        .position = { 0.f, 0.f, 0.f },
+        .rotation = Quat::angleAxis(pi_d2, { 0.f, 0.f, 1.f }),
+        .scale = Diag3x3{ 0.01f, 0.01f, 0.01f },
+        .objectID = 1
+    });
 
-    // Get all the asset paths and push unique scene infos
-    uint32_t num_loaded_scenes = 0;
-
-    for (int i = first_unique_scene; i < num_unique_scenes; ++i) {
-        int random_index = random_indices[i];
-        printf("Loading scene with %d\n", random_index);
-
-        std::string scene_path = scene_paths[random_index];
-
-        HabitatJSON::Scene loaded_scene;
-
-        //uncomment this for procthor
-        if (proc_thor && proc_thor[0] == '1') {
-            loaded_scene = HabitatJSON::procThorJSONLoad(
-                    procthor_root,
-                    procthor_obj_root,
-                    scene_path);
-        } else {
-            loaded_scene = HabitatJSON::habitatJSONLoad(scene_path);
-        }
-
-        // Store the current imported instances offset
-        uint32_t imported_instances_offset = 
-            load_result.importedInstances.size();
-
-        UniqueScene unique_scene_info = {
-            .numInstances = 0,
-            .instancesOffset = imported_instances_offset,
-            .center = { 0.f, 0.f, 0.f }
-        };
-
-        float stage_angle = 0;
-
-        if (loaded_scene.stageFront[0] == -1){
-            stage_angle = -pi/2;
-        }
-
-        Quat stage_rot = Quat::angleAxis(pi_d2,{ 1.f, 0.f, 0.f }) *
-                        Quat::angleAxis(stage_angle,{0,1,0});
-
-        load_result.importedInstances.push_back({
-            .position = stage_rot.rotateVec({ 0.f, 0.f, 0.f + height_offset }),
-            .rotation = stage_rot,
-            .scale = { scale, scale, scale },
-            .objectID = (int32_t)render_asset_paths.size(),
-        });
-
-        render_asset_paths.push_back(loaded_scene.stagePath.string());
-
-        std::unordered_map<std::string, uint32_t> loaded_gltfs;
-        std::unordered_map<uint32_t, uint32_t> object_to_imported_instance;
-        uint32_t num_center_contribs = 0;
-
-        for (const HabitatJSON::AdditionalInstance &inst :
-                loaded_scene.additionalInstances) {
-            auto path_view = inst.gltfPath.string();
-            auto extension_pos = path_view.rfind('.');
-            assert(extension_pos != path_view.npos);
-            auto extension = path_view.substr(extension_pos + 1);
-
-            if (extension == "json") {
-                continue;
-            }
-
-            auto [iter, insert_success] = loaded_gltfs.emplace(inst.gltfPath.string(), 
-                    render_asset_paths.size());
-            if (insert_success) {
-                auto pos = Quat::angleAxis(pi_d2, { 1.f, 0.f, 0.f }).
-                           rotateVec(Vector3{ inst.pos[0], inst.pos[1], 
-                                              inst.pos[2] + height_offset });
-
-                auto scale_vec = madrona::math::Diag3x3 {
-                    inst.scale[0] * scale,
-                    inst.scale[1] * scale,
-                    inst.scale[2] * scale
-                };
-                
-                ImportedInstance new_inst = {
-                    .position = {pos.x * scale, pos.y * scale, pos.z * scale},
-                    .rotation = Quat::angleAxis(pi_d2, { 1.f, 0.f, 0.f }) * 
-                                Quat{ inst.rotation[0], inst.rotation[1],
-                                      inst.rotation[2], inst.rotation[3] },
-                    .scale = scale_vec,
-                    .objectID = (int32_t)render_asset_paths.size(),
-                };
-
-                unique_scene_info.center += math::Vector3{
-                    new_inst.position.x, new_inst.position.y, 0.f };
-                num_center_contribs++;
-
-                load_result.importedInstances.push_back(new_inst);
-                render_asset_paths.push_back(inst.gltfPath.string());
-            } else {
-                // Push the instance to the instances array
-                auto pos = Quat::angleAxis(pi_d2, { 1.f, 0.f, 0.f }).
-                           rotateVec(Vector3{ inst.pos[0], inst.pos[1], 
-                                              inst.pos[2] + height_offset });
-
-                auto scale_vec = madrona::math::Diag3x3 {
-                    inst.scale[0] * scale,
-                    inst.scale[1] * scale,
-                    inst.scale[2] * scale
-                };
-
-                ImportedInstance new_inst = {
-                    .position = {pos.x * scale,pos.y * scale,pos.z * scale},
-                    .rotation = Quat::angleAxis(pi_d2,{ 1.f, 0.f, 0.f }) *
-                                Quat{ inst.rotation[0], inst.rotation[1],
-                                      inst.rotation[2], inst.rotation[3] },
-                    .scale = scale_vec,
-                    .objectID = (int32_t)iter->second,
-                };
-
-                unique_scene_info.center += math::Vector3{
-                    new_inst.position.x, new_inst.position.y, 0.f };
-                num_center_contribs++;
-
-                load_result.importedInstances.push_back(new_inst);
-            }
-
-            unique_scene_info.numInstances =
-                load_result.importedInstances.size() - unique_scene_info.instancesOffset;
-        }
-
-        unique_scene_info.center = unique_scene_info.center / (float)num_center_contribs;
-
-        load_result.uniqueSceneInfos.push_back(unique_scene_info);
-
-        num_loaded_scenes++;
-    }
+    load_result.uniqueSceneInfos.push_back({
+        2, 0, 2, { 0.f, 0.f, 0.f }
+    });
 
     std::vector<const char *> render_asset_cstrs;
-    for (size_t i = 0; i < render_asset_paths.size(); i++) {
+    for (size_t i = 0; i < render_asset_paths.size(); i++)
         render_asset_cstrs.push_back(render_asset_paths[i].c_str());
-    }
 
     imp::AssetImporter importer;
 
@@ -410,13 +256,19 @@ static imp::ImportedAssets loadScenes(
         render_asset_cstrs, Span<char>(import_err.data(), import_err.size()),
         true);
 
-    if (cache_everything && std::stoi(cache_everything) == 1) {
-        exit(0);
-    }
-
     if (!render_assets.has_value()) {
         FATAL("Failed to load render assets: %s", import_err);
     }
+
+    render_assets->materials.push_back({
+        .color = { 1.f, 1.f, 1.f, 1.f },
+        .textureIdx = -1,
+        .roughness = 1.f,
+        .metalness = 0.1f,
+    });
+
+    render_assets->objects[1].meshes[0].materialIDX = 
+        render_assets->materials.size() - 1;
 
     if (render_mgr.has_value()) {
         render_mgr->loadObjects(render_assets->objects, 
@@ -424,7 +276,8 @@ static imp::ImportedAssets loadScenes(
                 render_assets->textures);
 
         render_mgr->configureLighting({
-            { true, math::Vector3{1.0f, -1.0f, -0.05f}, math::Vector3{1.0f, 1.0f, 1.0f} }
+            { true, math::Vector3{1.0f, -1.0f, -0.05f}, 
+              math::Vector3{1.0f, 1.0f, 1.0f} }
         });
     }
 
@@ -460,27 +313,12 @@ Manager::Impl * Manager::Impl::init(
         std::vector<ImportedInstance> imported_instances;
 
         sim_cfg.mergeAll = false;
-        sim_cfg.dynamicMovement = mgr_cfg.dynamicMovement;
-
-        const char *first_unique_scene_str = getenv("HSSD_FIRST_SCENE");
-        const char *num_unique_scene_str = getenv("HSSD_NUM_SCENES");
-
-        uint32_t first_scene = 0;
-        uint32_t num_scenes = 1;
-
-        if (first_unique_scene_str) {
-            first_scene = std::stoi(first_unique_scene_str);
-        }
-
-        if (num_unique_scene_str) {
-            num_scenes = std::stoi(num_unique_scene_str);
-        }
 
         LoadResult load_result = {};
 
-        auto imported_assets = loadScenes(
-                render_mgr, first_scene,
-                num_scenes,
+        auto imported_assets = loadGLB(
+                render_mgr,
+                mgr_cfg.glbPath,
                 load_result);
 
         sim_cfg.importedInstances = (ImportedInstance *)cu::allocGPU(
@@ -539,8 +377,8 @@ Manager::Impl * Manager::Impl::init(
             .numTaskGraphs = (uint32_t)TaskGraphID::NumTaskGraphs,
             .numExportedBuffers = (uint32_t)ExportID::NumExports, 
         }, {
-            { HABITAT_SRC_LIST },
-            { HABITAT_COMPILE_FLAGS },
+            { GLB_SRC_LIST },
+            { GLB_COMPILE_FLAGS },
             CompileConfig::OptMode::LTO,
         }, cu_ctx, 
         mgr_cfg.enableBatchRenderer ? Optional<madrona::CudaBatchRenderConfig>::none() : 

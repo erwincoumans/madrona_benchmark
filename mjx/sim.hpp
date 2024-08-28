@@ -17,7 +17,8 @@ enum class ExportID : uint32_t {
     InstanceRotations,
     CameraPositions,
     CameraRotations,
-    Raycast,
+    RaycastDepth,
+    RaycastColor,
     NumExports,
 };
 
@@ -42,6 +43,8 @@ struct Sim : public madrona::WorldBase {
         uint32_t numGeoms;
         uint32_t numCams;
         const madrona::render::RenderECSBridge *renderBridge;
+        bool useDebugCamEntity;
+        bool useRT;
     };
 
     // This class would allow per-world custom data to be passed into

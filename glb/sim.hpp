@@ -77,7 +77,6 @@ struct Sim : public madrona::WorldBase {
         uint32_t numAgents;
 
         bool mergeAll;
-        bool dynamicMovement;
     };
 
     struct WorldInit {};
@@ -101,8 +100,6 @@ struct Sim : public madrona::WorldBase {
     madrona::math::Vector2 worldCenter;
 
     madrona::Entity agent;
-
-    bool dynamicMovement;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {
